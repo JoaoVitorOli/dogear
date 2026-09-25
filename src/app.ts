@@ -8,6 +8,7 @@ import { prismaPlugin } from './shared/database/prisma.plugin.js';
 import { registerErrorHandler } from './shared/http/error.handler.js';
 import { authController } from './modules/auth/auth.controller.js';
 import { partnersController } from './modules/partners/partner.controller.js';
+import { registerSwagger } from './shared/swagger/swagger.handler.js';
 
 export async function buildApp(config: Env) {
   const app = Fastify({
@@ -18,6 +19,7 @@ export async function buildApp(config: Env) {
   app.setSerializerCompiler(serializerCompiler);
 
   registerErrorHandler(app);
+  await registerSwagger(app);
 
   await app.register(prismaPlugin, {
     host: config.DATABASE_HOST,
