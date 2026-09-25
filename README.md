@@ -10,9 +10,11 @@ Dogear serves three kinds of clients:
 
 | Actor       | Auth                  | What they do                                                                             |
 | ----------- | --------------------- | ---------------------------------------------------------------------------------------- |
-| **Reader**  | JWT                   | Searches books, reads, tracks progress, sees stats and achievements                      |
-| **Partner** | API key (`x-api-key`) | Grants and revokes platform access for its own customers (e.g. telecom operators, banks) |
-| **Admin**   | JWT (`admin` role)    | Manages the catalog, partners and plans                                                  |
+| **Reader**  | JWT                   | Created by a partner, activates the account, then searches, reads and tracks progress    |
+| **Partner** | API key (`x-api-key`) | Creates reader accounts, grants and revokes access (e.g. telecom operators, banks)       |
+| **Admin**   | JWT (`admin` role)    | Manages the catalog, partners and plans (the first admin is created by a seed)           |
+
+There is **no public sign-up**: every reader account is created by a partner. A reader can only read books while they have at least one active entitlement.
 
 ---
 
@@ -33,17 +35,45 @@ sequenceDiagram
     alt Retried request
         API-->>P: 200 (same response as before)
     else New request
-        API->>SQL: Create user (if needed) + entitlement
+        alt Email not registered yet
+            API->>SQL: Create user (PENDING, no password)<br/>+ activation token + entitlement
+        else Email already registered
+            API->>SQL: Create entitlement for the existing user
+        end
         API->>MQ: Publish "entitlement.granted"
         API-->>P: 201 Created
     end
 ```
 
 - Retried requests (timeouts, network errors) never create duplicate entitlements.
-- Partners can revoke access with `DELETE /partners/v1/entitlements/:id`.
+- The email is the reader's identity: a customer granted access by two partners has one account and two entitlements.
+- Partners can revoke access with `DELETE /partners/v1/entitlements/:id`. It takes effect immediately, because access is checked on every request, not stored in the JWT.
 - Each partner has a request quota based on its plan (e.g. 60 req/min basic, 600 req/min enterprise).
 
-### 2.2 Reader searches, reads and tracks progress
+### 2.2 Reader activates the account
+
+```mermaid
+sequenceDiagram
+    participant R as Reader
+    participant API as Dogear API
+    participant SQL as MySQL
+
+    Note over API: On user creation, the activation link<br/>is "sent" by email (logged, no real delivery)
+    R->>API: POST /v1/auth/activate {token, password}
+    API->>SQL: Token valid, unused and not expired?
+    API->>SQL: Save password hash, status → ACTIVE, mark token as used
+    API-->>R: 204 No Content
+
+    R->>API: POST /v1/auth/login {email, password}
+    API-->>R: JWT
+```
+
+- Users start as `PENDING` and cannot log in until they activate.
+- Activation tokens are single-use, expire after 24h and are stored hashed.
+- If a token expires, the partner grants access again and a new token is issued.
+- Login always fails with a generic `401 Invalid credentials`, so it never reveals which emails exist.
+
+### 2.3 Reader searches, reads and tracks progress
 
 ```mermaid
 sequenceDiagram
@@ -73,8 +103,9 @@ sequenceDiagram
 
 - Search tolerates typos and supports autocomplete and filters (author, genre, format).
 - The API responds right away; the heavy processing happens asynchronously in workers.
+- Recording reading events requires an active entitlement; otherwise the API returns `403`.
 
-### 2.3 Admin adds a book
+### 2.4 Admin adds a book
 
 The admin creates a book (`POST /v1/admin/books`). It is saved in **MySQL** (the source of truth), a `book.created` event is published, and a worker indexes it in **Elasticsearch**. Failed indexing is retried, then sent to a dead letter queue.
 
@@ -105,11 +136,11 @@ The API and workers live in the same repo but run as **separate processes**, so 
 
 ### Where data lives
 
-| Data                                                                      | Store             | Why                                                                 |
-| ------------------------------------------------------------------------- | ----------------- | ------------------------------------------------------------------- |
-| Users, partners, API keys, plans, entitlements, idempotency keys, catalog | **MySQL**         | Relational, needs transactions and unique constraints               |
-| Reading events, reader stats, achievements                                | **MongoDB**       | High-volume, append-only, flexible schema (pages vs. audio minutes) |
-| Book search index                                                         | **Elasticsearch** | Full-text, fuzzy matching, autocomplete, faceted filters            |
+| Data                                                                                         | Store             | Why                                                                 |
+| -------------------------------------------------------------------------------------------- | ----------------- | ------------------------------------------------------------------- |
+| Users, activation tokens, partners, API keys, plans, entitlements, idempotency keys, catalog | **MySQL**         | Relational, needs transactions and unique constraints               |
+| Reading events, reader stats, achievements                                                   | **MongoDB**       | High-volume, append-only, flexible schema (pages vs. audio minutes) |
+| Book search index                                                                            | **Elasticsearch** | Full-text, fuzzy matching, autocomplete, faceted filters            |
 
 ### Events
 
@@ -117,7 +148,7 @@ The API and workers live in the same repo but run as **separate processes**, so 
 | --------------------------------------------- | --------------------------------------------------- |
 | `book.created` / `book.updated`               | Search indexer                                      |
 | `reading.progress.updated`                    | Stats, Achievements                                 |
-| `entitlement.granted` / `entitlement.revoked` | Welcome notification (logged), session invalidation |
+| `entitlement.granted` / `entitlement.revoked` | Welcome / access-revoked notification (logged)      |
 
 **Reliability:** topic exchange, manual ack, retry with backoff (5s → 30s → 2min), dead letter queue, and idempotent consumers (each event has an `eventId`).
 
@@ -129,7 +160,7 @@ The API and workers live in the same repo but run as **separate processes**, so 
 | --------------------------------- | ------------------------------------------------- |
 | **Node.js + TypeScript**          | Language                                          |
 | **Fastify**                       | REST API (workers are plain Node.js processes)    |
-| **MySQL 8 + TypeORM** (or Prisma) | Relational data                                   |
+| **MySQL 8 + Prisma 7**            | Relational data and migrations                    |
 | **MongoDB + Mongoose**            | Reading events and stats                          |
 | **RabbitMQ**                      | Async processing, retries, DLQ                    |
 | **Elasticsearch 8**               | Catalog search                                    |
@@ -138,7 +169,7 @@ The API and workers live in the same repo but run as **separate processes**, so 
 | **@fastify/swagger** (OpenAPI)    | API docs for v1 and v2                            |
 | **@fastify/jwt** + API keys       | Authentication                                    |
 | **@fastify/rate-limit**           | Per-partner rate limiting                         |
-| **Jest + Supertest**              | Unit and e2e tests                                |
+| **Jest** + Fastify `inject()`     | Unit and e2e tests (no HTTP server needed)        |
 | **k6**                            | Load testing                                      |
 | **Docker Compose**                | One-command local environment                     |
 
@@ -148,7 +179,8 @@ The API and workers live in the same repo but run as **separate processes**, so 
 
 | Method   | Route                                    | Description                                    |
 | -------- | ---------------------------------------- | ---------------------------------------------- |
-| `POST`   | `/v1/auth/register` · `/v1/auth/login`   | Sign up / get JWT                              |
+| `POST`   | `/v1/auth/activate` · `/v1/auth/login`   | Activate account / get JWT                     |
+| `GET`    | `/v1/me`                                 | Current user                                   |
 | `GET`    | `/v1/books/search`                       | Search the catalog                             |
 | `GET`    | `/v1/books/:id`                          | Book details                                   |
 | `POST`   | `/v1/reading-events`                     | Record reading progress                        |
@@ -176,8 +208,8 @@ The API and workers live in the same repo but run as **separate processes**, so 
 
 | Day   | Deliverables                                                                          |
 | ----- | ------------------------------------------------------------------------------------- |
-| **1** | Docker Compose, Fastify setup, config, Swagger, users and auth (JWT + roles)          |
-| **2** | Catalog (MySQL), partners and API keys, idempotent entitlements, rate limiting        |
+| **1** | Docker Compose, Fastify setup, config, Swagger, user model, admin seed, login + roles |
+| **2** | Catalog, partners and API keys, idempotent entitlements, activation, rate limiting    |
 | **3** | Reading events (MongoDB), RabbitMQ publishers and workers, retry and DLQ              |
 | **4** | Elasticsearch indexing and search, Datadog tracing, logs and dashboard                |
 | **5** | `/v2` endpoint, tests, k6 load test, seed data, README                                |
