@@ -1,0 +1,33 @@
+# Dependências
+node_modules/
+
+# Build
+dist/
+
+# Client gerado pelo Prisma
+/src/generated/
+
+# Variáveis de ambiente (o .env.example deve continuar versionado)
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+logs/
+
+# Testes (Jest coverage)
+coverage/
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+
+# Configurações pessoais do Claude Code
+.claude/settings.local.json
