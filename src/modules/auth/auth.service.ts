@@ -1,6 +1,6 @@
 import { UserStatus } from '../../generated/prisma/client.js';
 import { verifyPassword } from '../../shared/security/password.js';
-import type { UsersService } from '../user/users.service.js';
+import type { UsersService } from '../users/users.service.js';
 import { InvalidCredentialsError } from './auth.errors.js';
 import type { TokenSigner } from './types/auth.types.js';
 
