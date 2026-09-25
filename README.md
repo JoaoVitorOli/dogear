@@ -1,4 +1,4 @@
-# Dogear — Reading Platform API
+# Dogear — Reading Platform API (wip)
 
 > A study project: the backend of a fictional digital reading platform (e-books, audiobooks and minibooks), with a partner API for B2B integrations.
 
@@ -8,11 +8,11 @@
 
 Dogear serves three kinds of clients:
 
-| Actor       | Auth                  | What they do                                                                             |
-| ----------- | --------------------- | ---------------------------------------------------------------------------------------- |
-| **Reader**  | JWT                   | Created by a partner, activates the account, then searches, reads and tracks progress    |
-| **Partner** | API key (`x-api-key`) | Creates reader accounts, grants and revokes access (e.g. telecom operators, banks)       |
-| **Admin**   | JWT (`admin` role)    | Manages the catalog and partners (the first admin is created by a seed)                  |
+| Actor       | Auth                  | What they do                                                                          |
+| ----------- | --------------------- | ------------------------------------------------------------------------------------- |
+| **Reader**  | JWT                   | Created by a partner, activates the account, then searches, reads and tracks progress |
+| **Partner** | API key (`x-api-key`) | Creates reader accounts, grants and revokes access (e.g. telecom operators, banks)    |
+| **Admin**   | JWT (`admin` role)    | Manages the catalog and partners (the first admin is created by a seed)               |
 
 There is **no public sign-up**: every reader account is created by a partner. A reader can only read books while they have at least one active entitlement.
 
@@ -167,11 +167,11 @@ The API and workers live in the same repo but run as **separate processes**, so 
 
 ### Events
 
-| Routing key                                   | Consumers                                           |
-| --------------------------------------------- | --------------------------------------------------- |
-| `book.created` / `book.updated`               | Search indexer                                      |
-| `reading.progress.updated`                    | Stats, Achievements                                 |
-| `entitlement.granted` / `entitlement.revoked` | Welcome / access-revoked notification (logged)      |
+| Routing key                                   | Consumers                                      |
+| --------------------------------------------- | ---------------------------------------------- |
+| `book.created` / `book.updated`               | Search indexer                                 |
+| `reading.progress.updated`                    | Stats, Achievements                            |
+| `entitlement.granted` / `entitlement.revoked` | Welcome / access-revoked notification (logged) |
 
 **Reliability:** topic exchange, manual ack, retry with backoff (5s → 30s → 2min), dead letter queue, and idempotent consumers (each event has an `eventId`).
 
