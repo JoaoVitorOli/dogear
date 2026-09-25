@@ -29,6 +29,11 @@ export default defineConfig(
       'no-console': 'warn',
       '@typescript-eslint/consistent-type-imports': 'error',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      'no-restricted-properties': ['error', {
+        object: 'process',
+        property: 'env',
+        message: 'Use the src/shared/config/env.ts instead',
+      }],
     },
   },
 );
