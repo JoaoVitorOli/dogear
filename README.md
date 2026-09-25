@@ -12,7 +12,7 @@ Dogear serves three kinds of clients:
 | ----------- | --------------------- | ---------------------------------------------------------------------------------------- |
 | **Reader**  | JWT                   | Created by a partner, activates the account, then searches, reads and tracks progress    |
 | **Partner** | API key (`x-api-key`) | Creates reader accounts, grants and revokes access (e.g. telecom operators, banks)       |
-| **Admin**   | JWT (`admin` role)    | Manages the catalog, partners and plans (the first admin is created by a seed)           |
+| **Admin**   | JWT (`admin` role)    | Manages the catalog and partners (the first admin is created by a seed)                  |
 
 There is **no public sign-up**: every reader account is created by a partner. A reader can only read books while they have at least one active entitlement.
 
@@ -20,7 +20,30 @@ There is **no public sign-up**: every reader account is created by a partner. A 
 
 ## 2. User flows
 
-### 2.1 Partner grants access to a customer
+### 2.1 Admin onboards a partner
+
+```mermaid
+sequenceDiagram
+    participant A as Admin
+    participant API as Dogear API
+    participant SQL as MySQL
+
+    A->>API: POST /v1/admin/partners {name, requestsPerMinute?}
+    API->>SQL: Create partner (ACTIVE)
+    API-->>A: 201 Created
+
+    A->>API: POST /v1/admin/partners/:id/api-keys
+    API->>API: Generate random key (dk_live_...)
+    API->>SQL: Store only the SHA-256 hash + last 4 chars
+    API-->>A: 201 {apiKey} (shown only once)
+```
+
+- Partners are organizations, not people: they have no email or password, only API keys used server-to-server.
+- The key is delivered to the partner outside the system and cannot be retrieved again; if it is lost, a new one is issued.
+- A partner can have several keys, so keys can be rotated without downtime.
+- Passwords are hashed with **argon2** (slow on purpose, because humans pick weak passwords). API keys are hashed with **SHA-256**: they carry 256 random bits, so brute force is not a concern, and a deterministic hash allows an indexed lookup on every partner request.
+
+### 2.2 Partner grants access to a customer
 
 ```mermaid
 sequenceDiagram
@@ -48,9 +71,9 @@ sequenceDiagram
 - Retried requests (timeouts, network errors) never create duplicate entitlements.
 - The email is the reader's identity: a customer granted access by two partners has one account and two entitlements.
 - Partners can revoke access with `DELETE /partners/v1/entitlements/:id`. It takes effect immediately, because access is checked on every request, not stored in the JWT.
-- Each partner has a request quota based on its plan (e.g. 60 req/min basic, 600 req/min enterprise).
+- Each partner has its own request quota (100 req/min by default, adjustable per partner by the admin).
 
-### 2.2 Reader activates the account
+### 2.3 Reader activates the account
 
 ```mermaid
 sequenceDiagram
@@ -73,7 +96,7 @@ sequenceDiagram
 - If a token expires, the partner grants access again and a new token is issued.
 - Login always fails with a generic `401 Invalid credentials`, so it never reveals which emails exist.
 
-### 2.3 Reader searches, reads and tracks progress
+### 2.4 Reader searches, reads and tracks progress
 
 ```mermaid
 sequenceDiagram
@@ -105,7 +128,7 @@ sequenceDiagram
 - The API responds right away; the heavy processing happens asynchronously in workers.
 - Recording reading events requires an active entitlement; otherwise the API returns `403`.
 
-### 2.4 Admin adds a book
+### 2.5 Admin adds a book
 
 The admin creates a book (`POST /v1/admin/books`). It is saved in **MySQL** (the source of truth), a `book.created` event is published, and a worker indexes it in **Elasticsearch**. Failed indexing is retried, then sent to a dead letter queue.
 
@@ -136,11 +159,11 @@ The API and workers live in the same repo but run as **separate processes**, so 
 
 ### Where data lives
 
-| Data                                                                                         | Store             | Why                                                                 |
-| -------------------------------------------------------------------------------------------- | ----------------- | ------------------------------------------------------------------- |
-| Users, activation tokens, partners, API keys, plans, entitlements, idempotency keys, catalog | **MySQL**         | Relational, needs transactions and unique constraints               |
-| Reading events, reader stats, achievements                                                   | **MongoDB**       | High-volume, append-only, flexible schema (pages vs. audio minutes) |
-| Book search index                                                                            | **Elasticsearch** | Full-text, fuzzy matching, autocomplete, faceted filters            |
+| Data                                                                                  | Store             | Why                                                                 |
+| ------------------------------------------------------------------------------------- | ----------------- | ------------------------------------------------------------------- |
+| Users, activation tokens, partners, API keys, entitlements, idempotency keys, catalog | **MySQL**         | Relational, needs transactions and unique constraints               |
+| Reading events, reader stats, achievements                                            | **MongoDB**       | High-volume, append-only, flexible schema (pages vs. audio minutes) |
+| Book search index                                                                     | **Elasticsearch** | Full-text, fuzzy matching, autocomplete, faceted filters            |
 
 ### Events
 
@@ -160,6 +183,8 @@ The API and workers live in the same repo but run as **separate processes**, so 
 | --------------------------------- | ------------------------------------------------- |
 | **Node.js + TypeScript**          | Language                                          |
 | **Fastify**                       | REST API (workers are plain Node.js processes)    |
+| **zod** (+ Fastify type provider) | Config, request/response validation, OpenAPI      |
+| **argon2** (`@node-rs/argon2`)    | Password hashing                                  |
 | **MySQL 8 + Prisma 7**            | Relational data and migrations                    |
 | **MongoDB + Mongoose**            | Reading events and stats                          |
 | **RabbitMQ**                      | Async processing, retries, DLQ                    |
@@ -200,7 +225,7 @@ The API and workers live in the same repo but run as **separate processes**, so 
 - **Security:** hashed passwords and API keys (keys shown only once), role-based authorization hooks, per-partner rate limiting, input validation.
 - **Observability:** `x-correlation-id` propagated from HTTP through RabbitMQ into logs and traces; custom metrics (events/min, DLQ size, search latency); Datadog dashboard.
 - **Reliability:** idempotent endpoints and consumers, retries + DLQ, health checks for every dependency.
-- **Quality:** unit tests for business rules, e2e tests for main flows, ESLint + Prettier.
+- **Quality:** unit tests for business rules, e2e tests for main flows, ESLint (with `@stylistic` for formatting).
 
 ---
 
@@ -216,6 +241,21 @@ The API and workers live in the same repo but run as **separate processes**, so 
 
 ---
 
-## 8. Out of scope
+## 8. Running locally
+
+Requirements: Node.js 24+, pnpm and Docker.
+
+1. Copy `.env.example` to `.env` and fill in the values (generate `JWT_SECRET` with `openssl rand -base64 48`).
+2. Start the infrastructure: `docker compose up -d`
+3. Install dependencies: `pnpm install`
+4. Apply migrations and generate the Prisma client: `pnpm db:migrate`
+5. Create the first admin: `pnpm db:seed`
+6. Start the API in watch mode: `pnpm dev`
+
+`DATABASE_URL` is used only by the Prisma CLI (migrations) and needs a user that can create databases (Prisma's shadow database). The API itself connects with the less privileged `DATABASE_USER`.
+
+---
+
+## 9. Out of scope
 
 E-book reader or audio player (reading is simulated through events), file uploads, payments, real email delivery, front-end and cloud deployment.
