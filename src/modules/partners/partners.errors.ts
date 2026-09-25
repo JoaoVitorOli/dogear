@@ -1,4 +1,4 @@
-import { ConflictError, NotFoundError } from '../../shared/errors/app-errors.js';
+import { ConflictError, NotFoundError, UnauthorizedError } from '../../shared/errors/app-errors.js';
 
 export class PartnerNotFoundError extends NotFoundError {
   constructor() {
@@ -9,5 +9,11 @@ export class PartnerNotFoundError extends NotFoundError {
 export class PartnerNameTakenError extends ConflictError {
   constructor() {
     super('A partner with this name already exists');
+  }
+}
+
+export class InvalidApiKeyError extends UnauthorizedError {
+  constructor() {
+    super('Invalid API key');
   }
 }

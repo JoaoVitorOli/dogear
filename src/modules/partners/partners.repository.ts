@@ -19,4 +19,18 @@ export class PartnersRepository {
   createApiKey(data: { partnerId: string; keyHash: string; lastFour: string }) {
     return this.prisma.apiKey.create({ data });
   }
+
+  findApiKeyByHash(keyHash: string) {
+    return this.prisma.apiKey.findUnique({
+      where: { keyHash },
+      include: { partner: true },
+    });
+  }
+
+  touchApiKey(id: string) {
+    return this.prisma.apiKey.update({
+      where: { id },
+      data: { lastUsedAt: new Date() },
+    });
+  }
 }
