@@ -63,6 +63,7 @@ export async function buildApp(config: Env) {
 
   await app.register(entitlementsController, {
     prefix: '/partners/v1/entitlements',
+    entitlementsService: container.entitlementsService,
   });
 
   return app;
