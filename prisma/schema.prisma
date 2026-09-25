@@ -37,3 +37,36 @@ model User {
 
   @@map("users")
 }
+
+enum PartnerStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+model Partner {
+  id                String        @id @default(uuid(7)) @db.Char(36)
+  name              String        @unique @db.VarChar(120)
+  status            PartnerStatus @default(ACTIVE)
+  requestsPerMinute Int           @default(100) @map("requests_per_minute")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  apiKeys ApiKey[]
+
+  @@map("partners")
+}
+
+model ApiKey {
+  id         String    @id @default(uuid(7)) @db.Char(36)
+  partnerId  String    @map("partner_id") @db.Char(36)
+  keyHash    String    @unique @map("key_hash") @db.Char(64)
+  lastFour   String    @map("last_four") @db.Char(4)
+  lastUsedAt DateTime? @map("last_used_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  partner Partner @relation(fields: [partnerId], references: [id])
+
+  @@index([partnerId])
+  @@map("api_keys")
+}
