@@ -25,15 +25,17 @@ enum UserStatus {
 }
 
 model User {
-  id           String     @id @default(uuid(7)) @db.Char(36)
-  email        String     @unique @db.VarChar(255)
-  name         String?    @db.VarChar(120)
-  passwordHash String?    @map("password_hash") @db.VarChar(255)
-  role         UserRole   @default(READER)
-  status       UserStatus @default(PENDING)
-  activatedAt  DateTime?  @map("activated_at")
-  createdAt    DateTime   @default(now()) @map("created_at")
-  updatedAt    DateTime   @updatedAt @map("updated_at")
+  id               String            @id @default(uuid(7)) @db.Char(36)
+  email            String            @unique @db.VarChar(255)
+  name             String?           @db.VarChar(120)
+  passwordHash     String?           @map("password_hash") @db.VarChar(255)
+  role             UserRole          @default(READER)
+  status           UserStatus        @default(PENDING)
+  activatedAt      DateTime?         @map("activated_at")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  entitlements     Entitlement[]
+  activationTokens ActivationToken[]
 
   @@map("users")
 }
@@ -51,7 +53,9 @@ model Partner {
   createdAt         DateTime      @default(now()) @map("created_at")
   updatedAt         DateTime      @updatedAt @map("updated_at")
 
-  apiKeys ApiKey[]
+  apiKeys         ApiKey[]
+  entitlements    Entitlement[]
+  idempotencyKeys IdempotencyKey[]
 
   @@map("partners")
 }
@@ -69,4 +73,58 @@ model ApiKey {
 
   @@index([partnerId])
   @@map("api_keys")
+}
+
+enum EntitlementStatus {
+  ACTIVE
+  REVOKED
+}
+
+model Entitlement {
+  id                 String            @id @default(uuid(7)) @db.Char(36)
+  partnerId          String            @map("partner_id") @db.Char(36)
+  userId             String            @map("user_id") @db.Char(36)
+  externalCustomerId String?           @map("external_customer_id") @db.VarChar(120)
+  status             EntitlementStatus @default(ACTIVE)
+  grantedAt          DateTime          @default(now()) @map("granted_at")
+  revokedAt          DateTime?         @map("revoked_at")
+  createdAt          DateTime          @default(now()) @map("created_at")
+  updatedAt          DateTime          @updatedAt @map("updated_at")
+
+  partner Partner @relation(fields: [partnerId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@unique([partnerId, userId])
+  @@unique([partnerId, externalCustomerId])
+  @@index([userId, status])
+  @@map("entitlements")
+}
+
+model ActivationToken {
+  id        String    @id @default(uuid(7)) @db.Char(36)
+  userId    String    @map("user_id") @db.Char(36)
+  tokenHash String    @unique @map("token_hash") @db.Char(64)
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@map("activation_tokens")
+}
+
+model IdempotencyKey {
+  id             String   @id @default(uuid(7)) @db.Char(36)
+  partnerId      String   @map("partner_id") @db.Char(36)
+  key            String   @db.VarChar(255)
+  requestHash    String   @map("request_hash") @db.Char(64)
+  responseStatus Int?     @map("response_status")
+  responseBody   Json?    @map("response_body")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  partner Partner @relation(fields: [partnerId], references: [id])
+
+  @@unique([partnerId, key])
+  @@map("idempotency_keys")
 }
