@@ -9,6 +9,8 @@ import { registerErrorHandler } from './shared/http/error.handler.js';
 import { authController } from './modules/auth/auth.controller.js';
 import { partnersController } from './modules/partners/partner.controller.js';
 import { registerSwagger } from './shared/swagger/swagger.handler.js';
+import { partnerAuthPlugin } from './modules/partners/partner-auth.plugin.js';
+import { entitlementsController } from './modules/entitlements/entitlements.controller.js';
 
 export async function buildApp(config: Env) {
   const app = Fastify({
@@ -35,6 +37,10 @@ export async function buildApp(config: Env) {
     signToken: (payload) => app.jwt.sign(payload), 
   });
 
+  await app.register(partnerAuthPlugin, {
+    partnersService: container.partnersService,
+  });
+
   app.get('/health', async () => {
     await app.prisma.$queryRaw`SELECT 1`;
     return { status: 'ok' };
@@ -53,6 +59,10 @@ export async function buildApp(config: Env) {
   await app.register(partnersController, {
     prefix: '/v1/admin/partners',
     partnersService: container.partnersService,
+  });
+
+  await app.register(entitlementsController, {
+    prefix: '/partners/v1/entitlements',
   });
 
   return app;
